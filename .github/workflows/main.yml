@@ -1,18 +1,17 @@
-name: main
+name: android
 on:
-  workflow_dispatch:
   push:
     branches:
-     - master
-     - 'feature/**'
+      - master
+      - 'feature/**'
     paths:
       - 'source/**'
       - 'express/**'
       - 'test/**'
       - 'project/android/**'
-      - '.github/workflows/android.yml'
       - '3rd_party/**'
       - 'apps/mnncli/**'
+      - '.github/workflows/android.yml'
   pull_request:
     branches: [master]
     paths:
@@ -20,9 +19,9 @@ on:
       - 'express/**'
       - 'test/**'
       - 'project/android/**'
-      - '.github/workflows/android.yml'
       - '3rd_party/**'
       - 'apps/mnncli/**'
+      - '.github/workflows/android.yml'
 
 concurrency:
   group: android-${{ github.ref }}
@@ -36,41 +35,58 @@ jobs:
   android_build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
-          submodules: true
-      
+          submodules: recursive
+          fetch-depth: 1
+
       - name: Setup Android NDK
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: r21e
           add-to-path: true
-      
+
       - name: Install Dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y unzip adb ninja-build
-      
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build \
+            adb \
+            unzip \
+            wget
+
+      - name: Cache QNN SDK
+        id: cache-qnn
+        uses: actions/cache@v3
+        with:
+          path: qnn-sdk  # 缓存整个解压后的SDK目录
+          key: qnn-sdk-v2.39.0.250926  # 版本号更新为新SDK版本
+
       - name: Download QNN SDK
+        if: steps.cache-qnn.outputs.cache-hit != 'true'
         run: |
-          wget https://apigwx-aws.qualcomm.com/qsc/public/v1/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.39.0.250926/v2.39.0.250926.zip
-          unzip -q v2.39.0.250926.zip -d qnn-sdk
-      
+          # 使用新提供的直链下载
+          wget https://apigwx-aws.qualcomm.com/qsc/public/v1/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.39.0.250926/v2.39.0.250926.zip -O qnn-sdk.zip
+          # 解压到qnn-sdk目录（解压后内部结构为qairt/2.39.0.250926/）
+          unzip -q qnn-sdk.zip -d qnn-sdk
+          rm -f qnn-sdk.zip
+
       - name: Build Android 64bit (ARMv8+)
         run: |
           cd project/android
-          mkdir build_64
+          mkdir -p build_64
           cd build_64
+          # 调整QNN_SDK_ROOT路径为新的解压结构
           ../build_64.sh "-DCMAKE_BUILD_TYPE=Release \
-            -DMNN_LOW_MEMORY=true \
-            -DMNN_CPU_WEIGHT_DEQUANT_GEMM=true \
-            -DMNN_BUILD_LLM=true \
-            -DMNN_SUPPORT_TRANSFORMER_FUSE=true \
-            -DLLM_SUPPORT_VISION=true \
-            -DMNN_BUILD_OPENCV=true \
-            -DMNN_IMGCODECS=true \
-            -DLLM_SUPPORT_AUDIO=true \
-            -DMNN_BUILD_AUDIO=true \
+            -DMNN_LOW_MEMORY=ON \
+            -DMNN_CPU_WEIGHT_DEQUANT_GEMM=ON \
+            -DMNN_BUILD_LLM=ON \
+            -DMNN_SUPPORT_TRANSFORMER_FUSE=ON \
+            -DLLM_SUPPORT_VISION=ON \
+            -DMNN_BUILD_OPENCV=ON \
+            -DMNN_IMGCODECS=ON \
+            -DLLM_SUPPORT_AUDIO=ON \
+            -DMNN_BUILD_AUDIO=ON \
             -DMNN_SUPPORT_BF16=ON \
             -DMNN_QNN=ON \
             -DMNN_OPENCL=ON \
@@ -78,30 +94,44 @@ jobs:
             -DMNN_ARM82=ON \
             -DMNN_BUILD_MNNCLI=ON \
             -DMNN_USE_LOGCAT=ON \
-            -DMNN_BUILD_FOR_ANDROID_COMMAND=true \
-            -DQNN_SDK_ROOT=$(realpath ../../../qnn-sdk/qairt)"
+            -DMNN_BUILD_FOR_ANDROID_COMMAND=ON \
+            -DQNN_SDK_ROOT=${GITHUB_WORKSPACE}/qnn-sdk/qairt/2.39.0.250926"  # 新路径
           make -j$(nproc)
-      
-      - name: Collect Build Outputs
+
+      - name: Verify Build Outputs
         run: |
-          mkdir -p mnn_android_arm64
-          cp project/android/build_64/libMNN.so mnn_android_arm64/
-          cp project/android/build_64/libMNN_CL.so mnn_android_arm64/
-          cp project/android/build_64/libMNN_Vulkan.so mnn_android_arm64/
-          cp project/android/build_64/libMNN_QNN.so mnn_android_arm64/
-          cp project/android/build_64/apps/mnncli/mnncli mnn_android_arm64/
-          cp qnn-sdk/qairt/lib/aarch64-android/libQnnHtp.so mnn_android_arm64/
-          cp qnn-sdk/qairt/lib/aarch64-android/libQnnHtpV75Stub.so mnn_android_arm64/
-          cp qnn-sdk/qairt/lib/hexagon-v75/unsigned/libQnnHtpV75Skel.so mnn_android_arm64/
-          cp qnn-sdk/qairt/lib/aarch64-android/libQnnSystem.so mnn_android_arm64/
-      
+          # 验证核心库文件存在
+          test -f project/android/build_64/libMNN.so
+          test -f project/android/build_64/libMNN_CL.so
+          test -f project/android/build_64/libMNN_Vulkan.so
+          test -f project/android/build_64/libMNN_QNN.so
+          test -f project/android/build_64/apps/mnncli/mnncli
+          # 验证架构正确
+          file project/android/build_64/apps/mnncli/mnncli | grep -q "ARM aarch64"
+
+      - name: Collect Build Artifacts
+        run: |
+          mkdir -p mnn_dist/arm64-v8a
+          # 复制核心库
+          cp project/android/build_64/libMNN.so mnn_dist/arm64-v8a/
+          cp project/android/build_64/libMNN_CL.so mnn_dist/arm64-v8a/
+          cp project/android/build_64/libMNN_Vulkan.so mnn_dist/arm64-v8a/
+          cp project/android/build_64/libMNN_QNN.so mnn_dist/arm64-v8a/
+          # 复制可执行文件
+          cp project/android/build_64/apps/mnncli/mnncli mnn_dist/arm64-v8a/
+          # 复制QNN依赖库（适配新SDK目录结构）
+          cp qnn-sdk/qairt/2.39.0.250926/lib/aarch64-android/libQnnHtp.so mnn_dist/arm64-v8a/
+          cp qnn-sdk/qairt/2.39.0.250926/lib/aarch64-android/libQnnHtpV75Stub.so mnn_dist/arm64-v8a/
+          cp qnn-sdk/qairt/2.39.0.250926/lib/hexagon-v75/unsigned/libQnnHtpV75Skel.so mnn_dist/arm64-v8a/
+          cp qnn-sdk/qairt/2.39.0.250926/lib/aarch64-android/libQnnSystem.so mnn_dist/arm64-v8a/
+          # 添加版本信息
+          echo "Build at: $(date)" > mnn_dist/arm64-v8a/build_info.txt
+          echo "Commit: ${GITHUB_SHA}" >> mnn_dist/arm64-v8a/build_info.txt
+          echo "QNN SDK Version: 2.39.0.250926" >> mnn_dist/arm64-v8a/build_info.txt  # 新增SDK版本信息
+
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: mnn-android-arm64-qnn-opencl-vulkan
-          path: mnn_android_arm64/
-      
-      - name: Verify Build
-        run: |
-          file project/android/build_64/apps/mnncli/mnncli | grep -q "ARM aarch64"
-          ls project/android/build_64/libMNN_QNN.so | grep -q "libMNN_QNN.so"
+          name: mnn-android-arm64-v8a
+          path: mnn_dist/arm64-v8a/
+          retention-days: 7
