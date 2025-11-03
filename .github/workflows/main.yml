@@ -1,0 +1,106 @@
+name: android
+on:
+  push:
+    branches:
+     - master
+     - 'feature/**'
+    paths:
+      - 'source/**'
+      - 'express/**'
+      - 'test/**'
+      - 'project/android/**'
+      - '.github/workflows/android.yml'
+      - '3rd_party/**'
+      - 'apps/mnncli/**'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'source/**'
+      - 'express/**'
+      - 'test/**'
+      - 'project/android/**'
+      - '.github/workflows/android.yml'
+      - '3rd_party/**'
+      - 'apps/mnncli/**'
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+  actions: read
+  checks: write
+
+jobs:
+  android_build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: true
+      
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r21e
+          add-to-path: true
+      
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip adb ninja-build
+      
+      - name: Download QNN SDK
+        run: |
+          wget https://developer.qualcomm.com/sites/default/files/docs/snpe/files/qnn-sdk-linux-x86_64-v2.14.0.240416.zip
+          unzip -q qnn-sdk-linux-x86_64-v2.14.0.240416.zip -d qnn-sdk
+      
+      - name: Build Android 64bit (ARMv8+)
+        run: |
+          cd project/android
+          mkdir build_64
+          cd build_64
+          ../build_64.sh "-DCMAKE_BUILD_TYPE=Release \
+            -DMNN_LOW_MEMORY=true \
+            -DMNN_CPU_WEIGHT_DEQUANT_GEMM=true \
+            -DMNN_BUILD_LLM=true \
+            -DMNN_SUPPORT_TRANSFORMER_FUSE=true \
+            -DLLM_SUPPORT_VISION=true \
+            -DMNN_BUILD_OPENCV=true \
+            -DMNN_IMGCODECS=true \
+            -DLLM_SUPPORT_AUDIO=true \
+            -DMNN_BUILD_AUDIO=true \
+            -DMNN_SUPPORT_BF16=ON \
+            -DMNN_QNN=ON \
+            -DMNN_OPENCL=ON \
+            -DMNN_VULKAN=ON \
+            -DMNN_ARM82=ON \
+            -DMNN_BUILD_MNNCLI=ON \
+            -DMNN_USE_LOGCAT=ON \
+            -DMNN_BUILD_FOR_ANDROID_COMMAND=true \
+            -DQNN_SDK_ROOT=$(realpath ../../../qnn-sdk/qnn-sdk-linux-x86_64-v2.14.0.240416)"
+          make -j$(nproc)
+      
+      - name: Collect Build Outputs
+        run: |
+          mkdir -p mnn_android_arm64
+          cp project/android/build_64/libMNN.so mnn_android_arm64/
+          cp project/android/build_64/libMNN_CL.so mnn_android_arm64/
+          cp project/android/build_64/libMNN_Vulkan.so mnn_android_arm64/
+          cp project/android/build_64/libMNN_QNN.so mnn_android_arm64/
+          cp project/android/build_64/apps/mnncli/mnncli mnn_android_arm64/
+          cp qnn-sdk/qnn-sdk-linux-x86_64-v2.14.0.240416/lib/aarch64-android/libQnnHtp.so mnn_android_arm64/
+          cp qnn-sdk/qnn-sdk-linux-x86_64-v2.14.0.240416/lib/aarch64-android/libQnnHtpV75Stub.so mnn_android_arm64/
+          cp qnn-sdk/qnn-sdk-linux-x86_64-v2.14.0.240416/lib/hexagon-v75/unsigned/libQnnHtpV75Skel.so mnn_android_arm64/
+          cp qnn-sdk/qnn-sdk-linux-x86_64-v2.14.0.240416/lib/aarch64-android/libQnnSystem.so mnn_android_arm64/
+      
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mnn-android-arm64-qnn-opencl-vulkan
+          path: mnn_android_arm64/
+      
+      - name: Verify Build
+        run: |
+          file project/android/build_64/apps/mnncli/mnncli | grep -q "ARM aarch64"
+          ls project/android/build_64/libMNN_QNN.so | grep -q "libMNN_QNN.so"
