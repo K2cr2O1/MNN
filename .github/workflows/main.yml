@@ -53,8 +53,8 @@ jobs:
       
       - name: Download QNN SDK
         run: |
-          wget https://developer.qualcomm.com/sites/default/files/docs/snpe/files/qnn-sdk-linux-x86_64-v2.14.0.240416.zip
-          unzip -q qnn-sdk-linux-x86_64-v2.14.0.240416.zip -d qnn-sdk
+          wget https://apigwx-aws.qualcomm.com/qsc/public/v1/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.39.0.250926/v2.39.0.250926.zip
+          unzip -q v2.39.0.250926.zip -d qnn-sdk
       
       - name: Build Android 64bit (ARMv8+)
         run: |
@@ -79,7 +79,7 @@ jobs:
             -DMNN_BUILD_MNNCLI=ON \
             -DMNN_USE_LOGCAT=ON \
             -DMNN_BUILD_FOR_ANDROID_COMMAND=true \
-            -DQNN_SDK_ROOT=$(realpath ../../../qnn-sdk/qnn-sdk-linux-x86_64-v2.14.0.240416)"
+            -DQNN_SDK_ROOT=$(realpath ../../../qnn-sdk/qairt)"
           make -j$(nproc)
       
       - name: Collect Build Outputs
@@ -90,10 +90,10 @@ jobs:
           cp project/android/build_64/libMNN_Vulkan.so mnn_android_arm64/
           cp project/android/build_64/libMNN_QNN.so mnn_android_arm64/
           cp project/android/build_64/apps/mnncli/mnncli mnn_android_arm64/
-          cp qnn-sdk/qnn-sdk-linux-x86_64-v2.14.0.240416/lib/aarch64-android/libQnnHtp.so mnn_android_arm64/
-          cp qnn-sdk/qnn-sdk-linux-x86_64-v2.14.0.240416/lib/aarch64-android/libQnnHtpV75Stub.so mnn_android_arm64/
-          cp qnn-sdk/qnn-sdk-linux-x86_64-v2.14.0.240416/lib/hexagon-v75/unsigned/libQnnHtpV75Skel.so mnn_android_arm64/
-          cp qnn-sdk/qnn-sdk-linux-x86_64-v2.14.0.240416/lib/aarch64-android/libQnnSystem.so mnn_android_arm64/
+          cp qnn-sdk/qairt/lib/aarch64-android/libQnnHtp.so mnn_android_arm64/
+          cp qnn-sdk/qairt/lib/aarch64-android/libQnnHtpV75Stub.so mnn_android_arm64/
+          cp qnn-sdk/qairt/lib/hexagon-v75/unsigned/libQnnHtpV75Skel.so mnn_android_arm64/
+          cp qnn-sdk/qairt/lib/aarch64-android/libQnnSystem.so mnn_android_arm64/
       
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
